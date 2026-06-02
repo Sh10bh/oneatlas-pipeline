@@ -1,8 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { v4 as uuidv4 } from 'uuid';
-import '../integrations/index'; // registers all integrations
+import './integrations/index'; // registers all integrations
 
 import {
   createJob, getJob, updateStageStatus, addRepairLog,
@@ -13,8 +12,7 @@ import { extractIntent } from './pipeline/intent';
 import { generateSchema } from './pipeline/schema';
 import { generateAppSpec } from './pipeline/appspec';
 import { integrationRegistry } from './integrations/registry';
-import { validateAppIntent, validateDataSchema, validateAppSpec } from './validation';
-import { structuralRepair, fieldRepair, consistencyRepair } from './repair';
+import { fieldRepair, consistencyRepair } from './repair/strategies';
 
 dotenv.config();
 
@@ -132,6 +130,8 @@ async function runPipeline(jobId: string): Promise<void> {
     updateStageStatus(jobId, 'intent_extraction', 'completed', {
       cost: result.cost,
       retryCount: result.retryCount,
+      partialOutput: result.intent,
+      repairLogsCount: result.repairLogs.length,
     });
 
     // If clarification required, stop here
@@ -140,7 +140,9 @@ async function runPipeline(jobId: string): Promise<void> {
       return;
     }
   } catch (err) {
-    updateStageStatus(jobId, 'intent_extraction', 'failed');
+    updateStageStatus(jobId, 'intent_extraction', 'failed', {
+      error: err instanceof Error ? err.message : String(err),
+    });
     throw err;
   }
 
@@ -154,9 +156,13 @@ async function runPipeline(jobId: string): Promise<void> {
     updateStageStatus(jobId, 'schema_generation', 'completed', {
       cost: result.cost,
       retryCount: result.retryCount,
+      partialOutput: result.schema,
+      repairLogsCount: result.repairLogs.length,
     });
   } catch (err) {
-    updateStageStatus(jobId, 'schema_generation', 'failed');
+    updateStageStatus(jobId, 'schema_generation', 'failed', {
+      error: err instanceof Error ? err.message : String(err),
+    });
     throw err;
   }
 
@@ -170,9 +176,13 @@ async function runPipeline(jobId: string): Promise<void> {
     updateStageStatus(jobId, 'appspec_generation', 'completed', {
       cost: result.cost,
       retryCount: result.retryCount,
+      partialOutput: result.appSpec,
+      repairLogsCount: result.repairLogs.length,
     });
   } catch (err) {
-    updateStageStatus(jobId, 'appspec_generation', 'failed');
+    updateStageStatus(jobId, 'appspec_generation', 'failed', {
+      error: err instanceof Error ? err.message : String(err),
+    });
     throw err;
   }
 

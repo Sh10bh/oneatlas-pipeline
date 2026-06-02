@@ -47,7 +47,13 @@ export function updateStageStatus(
   jobId: string,
   stage: StageName,
   status: StageStatus,
-  extra?: Partial<{ cost: StageCost; retryCount: number }>,
+  extra?: Partial<{
+    cost: StageCost;
+    retryCount: number;
+    partialOutput: unknown;
+    error: string;
+    repairLogsCount: number;
+  }>,
 ): void {
   const job = jobs.get(jobId);
   if (!job) return;
@@ -74,6 +80,9 @@ export function updateStageStatus(
     status,
     latencyMs: stageResult.latencyMs,
     cost: stageResult.cost,
+    partialOutput: extra?.partialOutput,
+    error: extra?.error,
+    repairLogsCount: extra?.repairLogsCount ?? stageResult.repairLogs.length,
   });
 }
 
@@ -82,6 +91,7 @@ export function addRepairLog(jobId: string, stage: StageName, log: RepairLog): v
   if (!job) return;
   job.stages[stage].repairLogs.push(log);
   job.updatedAt = Date.now();
+  emit(jobId, 'repair_log', { stage, log });
 }
 
 export function setJobIntent(jobId: string, intent: AppIntent): void {
@@ -153,6 +163,9 @@ export function getEventHistory(jobId: string): string {
   for (const stage of Object.values(job.stages)) {
     if (stage.status !== 'pending') {
       history += `event: stage_${stage.status === 'running' ? 'start' : stage.status === 'completed' ? 'complete' : 'failed'}\ndata: ${JSON.stringify({ stage: stage.stage, status: stage.status, latencyMs: stage.latencyMs })}\n\n`;
+      if (stage.repairLogs.length > 0) {
+        history += `event: repair_log\ndata: ${JSON.stringify({ stage: stage.stage, logs: stage.repairLogs })}\n\n`;
+      }
     }
   }
   if (job.status === 'completed' || job.status === 'failed') {

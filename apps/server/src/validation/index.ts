@@ -91,6 +91,7 @@ export function validateDataSchema(input: unknown): ValidationResult<DataSchema>
 export function validateAppSpec(
   input: unknown,
   dataSchema?: DataSchema,
+  requestedIntegrations?: string[],
 ): ValidationResult<AppSpec> {
   const base = validateWithSchema(AppSpecZ, input);
   if (!base.success) return base as ValidationResult<AppSpec>;
@@ -179,6 +180,19 @@ export function validateAppSpec(
         message: `Integration "${stub.integration}" has no action "${stub.action}"`,
         code: 'invalid_integration_action',
       });
+    }
+  }
+
+  if (requestedIntegrations && requestedIntegrations.length > 0) {
+    const integrationSet = new Set(spec.workflowStubs.map((stub) => stub.integration));
+    for (const integration of requestedIntegrations) {
+      if (!integrationSet.has(integration)) {
+        extraErrors.push({
+          field: `workflowStubs.${integration}`,
+          message: `Requested integration "${integration}" is missing a workflow stub`,
+          code: 'missing_requested_workflow_stub',
+        });
+      }
     }
   }
 

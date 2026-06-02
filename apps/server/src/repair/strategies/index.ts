@@ -1,13 +1,51 @@
 import { v4 as uuidv4 } from 'uuid';
-import type { RepairLog, RepairStrategy, RepairOutcome } from '../types/RepairLog';
-import type { StageName } from '../types/JobState';
-import { gatewayCall, extractJSON } from '../gateway';
-import { ROUTING_CONFIG } from '../config/model-routing';
+import type { RepairLog, RepairStrategy, RepairOutcome } from '../../types/RepairLog';
+import type { StageName } from '../../types/JobState';
+import { gatewayCall, extractJSON } from '../../gateway';
+import { ROUTING_CONFIG, type ModelConfig } from '../../config/model-routing';
+import type { StageCost } from '../../types/JobState';
+import { integrationRegistry } from '../../integrations/registry';
 
 export interface RepairResult {
   repaired: boolean;
   data: unknown;
   log: RepairLog;
+}
+
+function fillTerminalDefaults(stage: StageName, value: unknown): unknown {
+  if (!value || typeof value !== 'object') return value;
+  const data = value as Record<string, unknown>;
+
+  if (stage === 'intent_extraction') {
+    return {
+      appName: typeof data.appName === 'string' ? data.appName : 'GeneratedApp',
+      appType: typeof data.appType === 'string' ? data.appType : 'custom',
+      features: Array.isArray(data.features) ? data.features : ['core feature'],
+      entities: Array.isArray(data.entities) ? data.entities : ['User'],
+      integrations_requested: Array.isArray(data.integrations_requested) ? data.integrations_requested : [],
+      assumptions: Array.isArray(data.assumptions) ? data.assumptions : ['Assumed MVP scope from ambiguous prompt'],
+      clarification_required: data.clarification_required,
+    };
+  }
+
+  if (stage === 'schema_generation') {
+    return {
+      entities: Array.isArray(data.entities) ? data.entities : [],
+    };
+  }
+
+  if (stage === 'appspec_generation') {
+    return {
+      appName: typeof data.appName === 'string' ? data.appName : 'GeneratedApp',
+      pages: Array.isArray(data.pages) ? data.pages : [],
+      apiEndpoints: Array.isArray(data.apiEndpoints) ? data.apiEndpoints : [],
+      authRules: Array.isArray(data.authRules) ? data.authRules : [],
+      integrationHooks: Array.isArray(data.integrationHooks) ? data.integrationHooks : [],
+      workflowStubs: Array.isArray(data.workflowStubs) ? data.workflowStubs : [],
+    };
+  }
+
+  return value;
 }
 
 function makeLog(
@@ -16,6 +54,7 @@ function makeLog(
   errorInput: string,
   outcome: RepairOutcome,
   details: string,
+  extra?: { latencyMs?: number; estimatedCostUSD?: number },
 ): RepairLog {
   return {
     id: uuidv4(),
@@ -25,6 +64,8 @@ function makeLog(
     outcome,
     attemptedAt: Date.now(),
     details,
+    latencyMs: extra?.latencyMs,
+    estimatedCostUSD: extra?.estimatedCostUSD,
   };
 }
 
@@ -35,7 +76,7 @@ export function structuralRepair(rawText: string, stage: StageName): RepairResul
   const errorInput = rawText.slice(0, 200);
   try {
     const extracted = extractJSON(rawText);
-    const parsed = JSON.parse(extracted);
+    const parsed = fillTerminalDefaults(stage, JSON.parse(extracted));
     return {
       repaired: true,
       data: parsed,
@@ -52,7 +93,7 @@ export function structuralRepair(rawText: string, stage: StageName): RepairResul
       const closes = (partial.match(/\}/g) ?? []).length;
       partial += '}'.repeat(Math.max(0, opens - closes));
       try {
-        const parsed = JSON.parse(partial);
+        const parsed = fillTerminalDefaults(stage, JSON.parse(partial));
         return {
           repaired: true,
           data: parsed,
@@ -201,6 +242,35 @@ export function consistencyRepair(
         }
       }
     }
+
+    // Fix missing_requested_workflow_stub: append minimal stub/hook for integration
+    if (err.code === 'missing_requested_workflow_stub') {
+      const integrationId = err.field.split('.')[1];
+      const fallbackAction = integrationRegistry.get(integrationId)?.actions[0]?.id ?? 'default_action';
+      const firstEntity = Array.isArray((patched as { pages?: Array<{ boundEntity?: string }> }).pages)
+        ? (patched as { pages: Array<{ boundEntity?: string }> }).pages[0]?.boundEntity
+        : undefined;
+      const fallbackEntity = firstEntity ?? 'User';
+      if (Array.isArray(patched.workflowStubs)) {
+        patched.workflowStubs.push({
+          name: `${integrationId} automation stub`,
+          trigger: { entity: fallbackEntity, event: 'created' },
+          integration: integrationId,
+          action: fallbackAction,
+          payload: { sourceEntity: fallbackEntity },
+        });
+        repairedCount++;
+      }
+      if (Array.isArray(patched.integrationHooks)) {
+        patched.integrationHooks.push({
+          integrationId,
+          triggerEntity: fallbackEntity,
+          triggerEvent: 'created',
+          actionId: fallbackAction,
+          description: `Auto-generated hook for ${integrationId}`,
+        });
+      }
+    }
   }
 
   if (repairedCount > 0) {
@@ -228,9 +298,17 @@ export async function repromptRepair(
   errors: Array<{ field: string; message: string }>,
   stage: StageName,
   systemPrompt: string,
+  preferredModelCost?: Pick<StageCost, 'provider' | 'model'>,
 ): Promise<RepairResult> {
   const errorInput = JSON.stringify(errors).slice(0, 200);
   const cfg = ROUTING_CONFIG.repair;
+  const preferredModel: ModelConfig | undefined = preferredModelCost
+    ? {
+      provider: preferredModelCost.provider as ModelConfig['provider'],
+      model: preferredModelCost.model,
+      maxTokens: cfg.primary.maxTokens,
+    }
+    : undefined;
 
   const correctionPrompt = `The following JSON output failed validation with these errors:
 ${errors.map(e => `- ${e.field}: ${e.message}`).join('\n')}
@@ -241,14 +319,17 @@ ${originalOutput.slice(0, 2000)}
 Return ONLY the corrected JSON with all errors fixed. No explanation, no markdown fences.`;
 
   try {
-    const response = await gatewayCall(cfg.primary, cfg.fallback, systemPrompt, correctionPrompt);
+    const startedAt = Date.now();
+    const response = await gatewayCall(preferredModel ?? cfg.primary, cfg.fallback, systemPrompt, correctionPrompt);
     const extracted = extractJSON(response.text);
     const parsed = JSON.parse(extracted);
+    const latencyMs = Date.now() - startedAt;
     return {
       repaired: true,
       data: parsed,
       log: makeLog(stage, 'field_repair', errorInput, 'repaired',
-        `Re-prompt repair succeeded using ${response.cost.provider}/${response.cost.model}`),
+        `Re-prompt repair succeeded using ${response.cost.provider}/${response.cost.model}`,
+        { latencyMs, estimatedCostUSD: response.cost.estimatedUSD }),
     };
   } catch (err) {
     return {

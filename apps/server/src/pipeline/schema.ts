@@ -1,7 +1,7 @@
 import { gatewayCall, extractJSON } from '../gateway';
-import { ROUTING_CONFIG } from '../config/model-routing';
+import { ROUTING_CONFIG, applyStagePolicy } from '../config/model-routing';
 import { validateDataSchema } from '../validation';
-import { structuralRepair, fieldRepair, consistencyRepair, repromptRepair } from '../repair';
+import { structuralRepair, fieldRepair, consistencyRepair, repromptRepair } from '../repair/strategies';
 import type { AppIntent } from '../types/AppIntent';
 import type { DataSchema } from '../types/DataSchema';
 import type { StageCost } from '../types/JobState';
@@ -38,7 +38,7 @@ export interface SchemaGenerationResult {
 }
 
 export async function generateSchema(intent: AppIntent): Promise<SchemaGenerationResult> {
-  const cfg = ROUTING_CONFIG.schemaGeneration;
+  const cfg = applyStagePolicy(ROUTING_CONFIG.schemaGeneration);
   const repairLogs: RepairLog[] = [];
   let retryCount = 0;
 
@@ -90,7 +90,7 @@ Assumptions: ${intent.assumptions.join(', ')}`;
   if (!validation.success) {
     // Final re-prompt
     retryCount++;
-    const reprompt = await repromptRepair(rawText, validation.errors, 'schema_generation', SYSTEM_PROMPT);
+    const reprompt = await repromptRepair(rawText, validation.errors, 'schema_generation', SYSTEM_PROMPT, response.cost);
     repairLogs.push(reprompt.log);
     if (reprompt.repaired) {
       validation = validateDataSchema(reprompt.data);

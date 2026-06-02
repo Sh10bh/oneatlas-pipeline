@@ -1,7 +1,7 @@
 import { gatewayCall, extractJSON } from '../gateway';
-import { ROUTING_CONFIG } from '../config/model-routing';
+import { ROUTING_CONFIG, applyStagePolicy } from '../config/model-routing';
 import { validateAppSpec } from '../validation';
-import { structuralRepair, fieldRepair, consistencyRepair, repromptRepair } from '../repair';
+import { structuralRepair, fieldRepair, consistencyRepair, repromptRepair } from '../repair/strategies';
 import { integrationRegistry } from '../integrations/registry';
 import type { AppIntent } from '../types/AppIntent';
 import type { DataSchema } from '../types/DataSchema';
@@ -36,7 +36,7 @@ export async function generateAppSpec(
   intent: AppIntent,
   schema: DataSchema,
 ): Promise<AppSpecGenerationResult> {
-  const cfg = ROUTING_CONFIG.appspecGeneration;
+  const cfg = applyStagePolicy(ROUTING_CONFIG.appspecGeneration);
   const repairLogs: RepairLog[] = [];
   let retryCount = 0;
 
@@ -74,7 +74,7 @@ Every page must have a corresponding API endpoint.`;
     parsed = repair.repaired ? repair.data : {};
   }
 
-  let validation = validateAppSpec(parsed, schema);
+  let validation = validateAppSpec(parsed, schema, intent.integrations_requested);
 
   if (!validation.success) {
     const knownEntities = schema.entities.map(e => e.name);
@@ -86,7 +86,7 @@ Every page must have a corresponding API endpoint.`;
     );
     repairLogs.push(consistencyFix.log);
     if (consistencyFix.repaired) {
-      validation = validateAppSpec(consistencyFix.data, schema);
+      validation = validateAppSpec(consistencyFix.data, schema, intent.integrations_requested);
       parsed = consistencyFix.data;
     }
   }
@@ -99,17 +99,17 @@ Every page must have a corresponding API endpoint.`;
     );
     repairLogs.push(fieldFix.log);
     if (fieldFix.repaired) {
-      validation = validateAppSpec(fieldFix.data, schema);
+      validation = validateAppSpec(fieldFix.data, schema, intent.integrations_requested);
       parsed = fieldFix.data;
     }
   }
 
   if (!validation.success) {
     retryCount++;
-    const reprompt = await repromptRepair(rawText, validation.errors, 'appspec_generation', SYSTEM_PROMPT);
+    const reprompt = await repromptRepair(rawText, validation.errors, 'appspec_generation', SYSTEM_PROMPT, response.cost);
     repairLogs.push(reprompt.log);
     if (reprompt.repaired) {
-      validation = validateAppSpec(reprompt.data, schema);
+      validation = validateAppSpec(reprompt.data, schema, intent.integrations_requested);
       parsed = reprompt.data;
     }
   }

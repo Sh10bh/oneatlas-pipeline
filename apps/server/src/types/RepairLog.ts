@@ -13,4 +13,6 @@ export interface RepairLog {
   outcome: RepairOutcome;
   attemptedAt: number;
   details: string;
+  latencyMs?: number;
+  estimatedCostUSD?: number;
 }

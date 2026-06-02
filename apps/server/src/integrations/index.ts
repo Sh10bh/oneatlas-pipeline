@@ -1,18 +1,18 @@
 import { integrationRegistry } from './registry';
-import { slackIntegration } from './integrations/slack';
-import { stripeIntegration } from './integrations/stripe';
-import { whatsappIntegration } from './integrations/whatsapp';
-import { gmailIntegration } from './integrations/gmail';
-import { jiraIntegration } from './integrations/jira';
-import { githubIntegration } from './integrations/github';
-import { hubspotIntegration } from './integrations/hubspot';
-import { webhookIntegration } from './integrations/webhook';
-import { notionIntegration } from './integrations/notion';
-import { airtableIntegration } from './integrations/airtable';
-import { salesforceIntegration } from './integrations/salesforce';
-import { twilioSmsIntegration } from './integrations/twilio-sms';
-import { zapierIntegration } from './integrations/zapier';
-import { sheetsIntegration } from './integrations/sheets';
+import { slackIntegration } from './slack';
+import { stripeIntegration } from './stripe';
+import { whatsappIntegration } from './whatsapp';
+import { gmailIntegration } from './gmail';
+import { jiraIntegration } from './jira';
+import { githubIntegration } from './github';
+import { hubspotIntegration } from './hubspot';
+import { webhookIntegration } from './webhook';
+import { notionIntegration } from './notion';
+import { airtableIntegration } from './airtable';
+import { salesforceIntegration } from './salesforce';
+import { twilioSmsIntegration } from './twilio-sms';
+import { zapierIntegration } from './zapier';
+import { sheetsIntegration } from './sheets';
 
 // Register all integrations — 8 implemented + 6 stubbed
 integrationRegistry.register(slackIntegration);

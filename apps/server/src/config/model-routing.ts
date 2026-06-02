@@ -17,6 +17,11 @@ export interface ModelConfig {
 export interface StageRoutingConfig {
   primary: ModelConfig;
   fallback: ModelConfig;
+  policy?: {
+    maxEstimatedCostUsd?: number;
+    maxLatencyMs?: number;
+    forceProvider?: ProviderName;
+  };
 }
 
 export interface RoutingConfig {
@@ -30,14 +35,17 @@ export const ROUTING_CONFIG: RoutingConfig = {
   intentExtraction: {
     primary: { provider: 'groq', model: 'llama3-8b-8192', maxTokens: 1000 },
     fallback: { provider: 'openrouter', model: 'meta-llama/llama-3-8b-instruct', maxTokens: 1000 },
+    policy: { maxEstimatedCostUsd: 0.01, maxLatencyMs: 6000 },
   },
   schemaGeneration: {
     primary: { provider: 'anthropic', model: 'claude-haiku-4-5-20251001', maxTokens: 4000 },
     fallback: { provider: 'openrouter', model: 'anthropic/claude-haiku-4-5', maxTokens: 4000 },
+    policy: { maxEstimatedCostUsd: 0.15, maxLatencyMs: 16000 },
   },
   appspecGeneration: {
     primary: { provider: 'anthropic', model: 'claude-haiku-4-5-20251001', maxTokens: 6000 },
     fallback: { provider: 'openrouter', model: 'openai/gpt-4o-mini', maxTokens: 6000 },
+    policy: { maxEstimatedCostUsd: 0.20, maxLatencyMs: 22000 },
   },
   repair: {
     primary: { provider: 'groq', model: 'llama3-8b-8192', maxTokens: 2000 },
@@ -70,4 +78,15 @@ export function estimateCost(
   const key = `${provider}/${model}`;
   const rates = COST_TABLE[key] ?? { input: 0.50, output: 1.50 };
   return (promptTokens * rates.input + completionTokens * rates.output) / 1_000_000;
+}
+
+export function applyStagePolicy(config: StageRoutingConfig): StageRoutingConfig {
+  if (!config.policy?.forceProvider) return config;
+  return {
+    ...config,
+    primary: {
+      ...config.primary,
+      provider: config.policy.forceProvider,
+    },
+  };
 }

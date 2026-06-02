@@ -12,6 +12,35 @@ export interface GatewayResponse {
   cost: StageCost;
 }
 
+type OpenAILikeResponse = {
+  choices?: Array<{ message?: { content?: string } }>;
+  usage?: { prompt_tokens?: number; completion_tokens?: number };
+};
+
+type AnthropicResponse = {
+  content?: Array<{ text?: string }>;
+  usage?: { input_tokens?: number; output_tokens?: number };
+};
+
+type GeminiResponse = {
+  candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+  usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
+};
+
+async function parseJson<T>(res: Response): Promise<T> {
+  return (await res.json()) as T;
+}
+
+class GatewayHttpError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+    public readonly provider: string,
+  ) {
+    super(message);
+  }
+}
+
 // ─── Provider implementations ────────────────────────────────────────────────
 
 async function callOpenAI(req: GatewayRequest): Promise<GatewayResponse> {
@@ -33,11 +62,11 @@ async function callOpenAI(req: GatewayRequest): Promise<GatewayResponse> {
 
   if (!res.ok) {
     const err = await res.text();
-    throw new Error(`OpenAI ${res.status}: ${err}`);
+    throw new GatewayHttpError(`OpenAI ${res.status}: ${err}`, res.status, 'openai');
   }
 
-  const data = await res.json();
-  const text: string = data.choices[0].message.content ?? '';
+  const data = await parseJson<OpenAILikeResponse>(res);
+  const text: string = data.choices?.[0]?.message?.content ?? '';
   const promptTokens: number = data.usage?.prompt_tokens ?? 0;
   const completionTokens: number = data.usage?.completion_tokens ?? 0;
 
@@ -75,10 +104,10 @@ async function callAnthropic(req: GatewayRequest): Promise<GatewayResponse> {
 
   if (!res.ok) {
     const err = await res.text();
-    throw new Error(`Anthropic ${res.status}: ${err}`);
+    throw new GatewayHttpError(`Anthropic ${res.status}: ${err}`, res.status, 'anthropic');
   }
 
-  const data = await res.json();
+  const data = await parseJson<AnthropicResponse>(res);
   const text: string = data.content?.[0]?.text ?? '';
   const promptTokens: number = data.usage?.input_tokens ?? 0;
   const completionTokens: number = data.usage?.output_tokens ?? 0;
@@ -115,11 +144,11 @@ async function callGroq(req: GatewayRequest): Promise<GatewayResponse> {
 
   if (!res.ok) {
     const err = await res.text();
-    throw new Error(`Groq ${res.status}: ${err}`);
+    throw new GatewayHttpError(`Groq ${res.status}: ${err}`, res.status, 'groq');
   }
 
-  const data = await res.json();
-  const text: string = data.choices[0].message.content ?? '';
+  const data = await parseJson<OpenAILikeResponse>(res);
+  const text: string = data.choices?.[0]?.message?.content ?? '';
   const promptTokens: number = data.usage?.prompt_tokens ?? 0;
   const completionTokens: number = data.usage?.completion_tokens ?? 0;
 
@@ -159,11 +188,11 @@ async function callOpenRouter(req: GatewayRequest): Promise<GatewayResponse> {
 
   if (!res.ok) {
     const err = await res.text();
-    throw new Error(`OpenRouter ${res.status}: ${err}`);
+    throw new GatewayHttpError(`OpenRouter ${res.status}: ${err}`, res.status, 'openrouter');
   }
 
-  const data = await res.json();
-  const text: string = data.choices[0].message.content ?? '';
+  const data = await parseJson<OpenAILikeResponse>(res);
+  const text: string = data.choices?.[0]?.message?.content ?? '';
   const promptTokens: number = data.usage?.prompt_tokens ?? 0;
   const completionTokens: number = data.usage?.completion_tokens ?? 0;
 
@@ -199,13 +228,135 @@ async function callMistral(req: GatewayRequest): Promise<GatewayResponse> {
 
   if (!res.ok) {
     const err = await res.text();
-    throw new Error(`Mistral ${res.status}: ${err}`);
+    throw new GatewayHttpError(`Mistral ${res.status}: ${err}`, res.status, 'mistral');
   }
 
-  const data = await res.json();
-  const text: string = data.choices[0].message.content ?? '';
+  const data = await parseJson<OpenAILikeResponse>(res);
+  const text: string = data.choices?.[0]?.message?.content ?? '';
   const promptTokens: number = data.usage?.prompt_tokens ?? 0;
   const completionTokens: number = data.usage?.completion_tokens ?? 0;
+
+  return {
+    text,
+    cost: {
+      promptTokens,
+      completionTokens,
+      totalTokens: promptTokens + completionTokens,
+      estimatedUSD: estimateCost(req.modelConfig.provider, req.modelConfig.model, promptTokens, completionTokens),
+      provider: req.modelConfig.provider,
+      model: req.modelConfig.model,
+    },
+  };
+}
+
+async function callDeepSeek(req: GatewayRequest): Promise<GatewayResponse> {
+  const apiKey = process.env.DEEPSEEK_API_KEY;
+  if (!apiKey) throw new Error('DEEPSEEK_API_KEY not set');
+
+  const res = await fetch('https://api.deepseek.com/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({
+      model: req.modelConfig.model,
+      max_tokens: req.modelConfig.maxTokens,
+      messages: [
+        { role: 'system', content: req.systemPrompt },
+        { role: 'user', content: req.userPrompt },
+      ],
+    }),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new GatewayHttpError(`DeepSeek ${res.status}: ${err}`, res.status, 'deepseek');
+  }
+
+  const data = await parseJson<OpenAILikeResponse>(res);
+  const text: string = data.choices?.[0]?.message?.content ?? '';
+  const promptTokens: number = data.usage?.prompt_tokens ?? 0;
+  const completionTokens: number = data.usage?.completion_tokens ?? 0;
+
+  return {
+    text,
+    cost: {
+      promptTokens,
+      completionTokens,
+      totalTokens: promptTokens + completionTokens,
+      estimatedUSD: estimateCost(req.modelConfig.provider, req.modelConfig.model, promptTokens, completionTokens),
+      provider: req.modelConfig.provider,
+      model: req.modelConfig.model,
+    },
+  };
+}
+
+async function callGemini(req: GatewayRequest): Promise<GatewayResponse> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error('GEMINI_API_KEY not set');
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${req.modelConfig.model}:generateContent?key=${apiKey}`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{
+        parts: [{ text: `${req.systemPrompt}\n\n${req.userPrompt}` }],
+      }],
+      generationConfig: {
+        maxOutputTokens: req.modelConfig.maxTokens,
+      },
+    }),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new GatewayHttpError(`Gemini ${res.status}: ${err}`, res.status, 'gemini');
+  }
+
+  const data = await parseJson<GeminiResponse>(res);
+  const text: string = data.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text ?? '').join('') ?? '';
+  const promptTokens: number = data.usageMetadata?.promptTokenCount ?? 0;
+  const completionTokens: number = data.usageMetadata?.candidatesTokenCount ?? 0;
+
+  return {
+    text,
+    cost: {
+      promptTokens,
+      completionTokens,
+      totalTokens: promptTokens + completionTokens,
+      estimatedUSD: estimateCost(req.modelConfig.provider, req.modelConfig.model, promptTokens, completionTokens),
+      provider: req.modelConfig.provider,
+      model: req.modelConfig.model,
+    },
+  };
+}
+
+async function callGoogleAi(req: GatewayRequest): Promise<GatewayResponse> {
+  const apiKey = process.env.GOOGLE_AI_API_KEY ?? process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error('GOOGLE_AI_API_KEY not set');
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${req.modelConfig.model}:generateContent?key=${apiKey}`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{
+        parts: [{ text: `${req.systemPrompt}\n\n${req.userPrompt}` }],
+      }],
+      generationConfig: {
+        maxOutputTokens: req.modelConfig.maxTokens,
+      },
+    }),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new GatewayHttpError(`GoogleAI ${res.status}: ${err}`, res.status, 'google_ai');
+  }
+
+  const data = await parseJson<GeminiResponse>(res);
+  const text: string = data.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text ?? '').join('') ?? '';
+  const promptTokens: number = data.usageMetadata?.promptTokenCount ?? 0;
+  const completionTokens: number = data.usageMetadata?.candidatesTokenCount ?? 0;
 
   return {
     text,
@@ -227,6 +378,9 @@ async function callProvider(req: GatewayRequest): Promise<GatewayResponse> {
     case 'openai':     return callOpenAI(req);
     case 'anthropic':  return callAnthropic(req);
     case 'groq':       return callGroq(req);
+    case 'deepseek':   return callDeepSeek(req);
+    case 'gemini':     return callGemini(req);
+    case 'google_ai':  return callGoogleAi(req);
     case 'openrouter': return callOpenRouter(req);
     case 'mistral':    return callMistral(req);
     default:
@@ -247,6 +401,9 @@ export async function gatewayCall(
     return await callProvider({ systemPrompt, userPrompt, modelConfig: primary });
   } catch (primaryErr) {
     console.warn(`[gateway] Primary provider ${primary.provider}/${primary.model} failed:`, primaryErr);
+    const shouldFallback = primaryErr instanceof GatewayHttpError
+      && (primaryErr.status === 429 || primaryErr.status >= 500);
+    if (!shouldFallback) throw primaryErr;
     try {
       return await callProvider({ systemPrompt, userPrompt, modelConfig: fallback });
     } catch (fallbackErr) {

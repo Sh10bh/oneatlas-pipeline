@@ -1,7 +1,7 @@
 import { gatewayCall, extractJSON } from '../gateway';
-import { ROUTING_CONFIG } from '../config/model-routing';
+import { ROUTING_CONFIG, applyStagePolicy } from '../config/model-routing';
 import { validateAppIntent } from '../validation';
-import { structuralRepair, fieldRepair, repromptRepair } from '../repair';
+import { structuralRepair, fieldRepair, repromptRepair } from '../repair/strategies';
 import type { AppIntent } from '../types/AppIntent';
 import type { StageCost } from '../types/JobState';
 import type { RepairLog } from '../types/RepairLog';
@@ -28,7 +28,7 @@ export interface IntentExtractionResult {
 }
 
 export async function extractIntent(prompt: string): Promise<IntentExtractionResult> {
-  const cfg = ROUTING_CONFIG.intentExtraction;
+  const cfg = applyStagePolicy(ROUTING_CONFIG.intentExtraction);
   const repairLogs: RepairLog[] = [];
   let retryCount = 0;
 
@@ -49,7 +49,13 @@ export async function extractIntent(prompt: string): Promise<IntentExtractionRes
     } else {
       // Re-prompt once
       retryCount++;
-      const retry = await repromptRepair(rawText, [{ field: 'root', message: 'Invalid JSON' }], 'intent_extraction', SYSTEM_PROMPT);
+      const retry = await repromptRepair(
+        rawText,
+        [{ field: 'root', message: 'Invalid JSON' }],
+        'intent_extraction',
+        SYSTEM_PROMPT,
+        response.cost,
+      );
       repairLogs.push(retry.log);
       parsed = retry.data ?? {};
     }
@@ -70,7 +76,7 @@ export async function extractIntent(prompt: string): Promise<IntentExtractionRes
   if (!validation.success) {
     // Final re-prompt
     retryCount++;
-    const repair = await repromptRepair(rawText, validation.errors, 'intent_extraction', SYSTEM_PROMPT);
+    const repair = await repromptRepair(rawText, validation.errors, 'intent_extraction', SYSTEM_PROMPT, response.cost);
     repairLogs.push(repair.log);
     if (repair.repaired) {
       validation = validateAppIntent(repair.data);
