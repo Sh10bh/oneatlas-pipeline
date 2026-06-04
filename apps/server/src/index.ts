@@ -1,3 +1,4 @@
+import path from 'path';
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
@@ -14,7 +15,8 @@ import { generateAppSpec } from './pipeline/appspec';
 import { integrationRegistry } from './integrations/registry';
 import { fieldRepair, consistencyRepair } from './repair/strategies';
 
-dotenv.config();
+// Always load apps/server/.env (not dependent on where the terminal was started)
+dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
 
 const app = express();
 app.use(cors());
@@ -191,5 +193,14 @@ async function runPipeline(jobId: string): Promise<void> {
 
 const PORT = process.env.PORT ?? 3001;
 app.listen(PORT, () => {
+  const keyStatus = {
+    groq: Boolean(process.env.GROQ_API_KEY),
+    anthropic: Boolean(process.env.ANTHROPIC_API_KEY),
+    openrouter: Boolean(process.env.OPENROUTER_API_KEY),
+  };
   console.log(`[server] OneAtlas pipeline running on port ${PORT}`);
+  console.log('[server] API keys loaded:', keyStatus);
+  if (!keyStatus.groq) {
+    console.warn('[server] GROQ_API_KEY missing — intent stage will fail. Use apps/server/.env');
+  }
 });

@@ -1,0 +1,217 @@
+{
+  "summary": {
+    "runStartedAt": "2026-06-04T08:53:51.477Z",
+    "runCompletedAt": "2026-06-04T09:01:50.155Z",
+    "totalPrompts": 12,
+    "successCount": 12,
+    "successRate": 1,
+    "avgLatencyMs": 38881,
+    "totalCostUSD": 0.01322,
+    "avgCostUSD": 0.001102
+  },
+  "rows": [
+    {
+      "prompt": "Build a CRM for a real estate agency. Agents manage leads, properties, and deals. Admin sees analytics. WhatsApp notifications when a deal closes.",
+      "jobId": "bd200acf-14c5-43d7-a76d-ec39159c8e3e",
+      "status": "completed",
+      "failedStage": null,
+      "retryCount": 1,
+      "repairStrategies": [
+        "consistency_repair",
+        "consistency_repair",
+        "field_repair",
+        "consistency_repair",
+        "field_repair",
+        "consistency_repair",
+        "field_repair",
+        "field_repair"
+      ],
+      "totalLatencyMs": 41348,
+      "totalCostUSD": 0.0014941000000000002,
+      "integrationsDetected": [
+        "whatsapp"
+      ],
+      "error": null
+    },
+    {
+      "prompt": "Task manager for an engineering team. Tasks have due dates, assignees, priorities, and status. Team lead gets a Slack message when a task is overdue.",
+      "jobId": "fabac4d2-36a3-4ab1-ac87-d967bb6ca45d",
+      "status": "completed",
+      "failedStage": null,
+      "retryCount": 0,
+      "repairStrategies": [
+        "consistency_repair"
+      ],
+      "totalLatencyMs": 4908,
+      "totalCostUSD": 0.0023851500000000004,
+      "integrationsDetected": [
+        "slack"
+      ],
+      "error": null
+    },
+    {
+      "prompt": "Inventory system for a warehouse. Products, stock movements, suppliers. Low stock triggers an email alert.",
+      "jobId": "3bc0f27f-4038-458f-9b0a-b20fe3132f22",
+      "status": "completed",
+      "failedStage": null,
+      "retryCount": 0,
+      "repairStrategies": [
+        "consistency_repair",
+        "field_repair",
+        "consistency_repair"
+      ],
+      "totalLatencyMs": 4709,
+      "totalCostUSD": 0.00233907,
+      "integrationsDetected": [
+        "gmail"
+      ],
+      "error": null
+    },
+    {
+      "prompt": "HR tool for a 50-person company. Track employees, leave requests, and performance reviews. Notify manager on Slack when leave is approved.",
+      "jobId": "1e5fcf2a-dcd7-4377-993e-a141bd1d6550",
+      "status": "completed",
+      "failedStage": null,
+      "retryCount": 1,
+      "repairStrategies": [
+        "consistency_repair",
+        "consistency_repair",
+        "field_repair",
+        "consistency_repair",
+        "field_repair",
+        "consistency_repair",
+        "field_repair",
+        "field_repair"
+      ],
+      "totalLatencyMs": 7790,
+      "totalCostUSD": 0.00292218,
+      "integrationsDetected": [
+        "slack"
+      ],
+      "error": null
+    },
+    {
+      "prompt": "E-commerce backend. Products, orders, customers, payments via Stripe. Order confirmation sent via Gmail.",
+      "jobId": "724eb4a7-e3a7-4f4f-96fb-de4b5d5488dc",
+      "status": "completed",
+      "failedStage": null,
+      "retryCount": 0,
+      "repairStrategies": [
+        "consistency_repair"
+      ],
+      "totalLatencyMs": 33149,
+      "totalCostUSD": 0.0016477400000000002,
+      "integrationsDetected": [
+        "stripe",
+        "gmail"
+      ],
+      "error": null
+    },
+    {
+      "prompt": "Event management platform. Organizers create events, attendees register, QR check-in at the door. Confirmation via WhatsApp.",
+      "jobId": "c81f91d1-a507-47b4-9cc4-fe26d15c252e",
+      "status": "completed",
+      "failedStage": null,
+      "retryCount": 0,
+      "repairStrategies": [],
+      "totalLatencyMs": 67061,
+      "totalCostUSD": 0.00051639,
+      "integrationsDetected": [
+        "whatsapp"
+      ],
+      "error": null
+    },
+    {
+      "prompt": "Project tracker. Projects, milestones, tasks. Sync tasks to Jira. Update a Google Sheet with weekly progress.",
+      "jobId": "991e699f-cc7d-4396-9fe3-f343b11689f5",
+      "status": "completed",
+      "failedStage": null,
+      "retryCount": 0,
+      "repairStrategies": [],
+      "totalLatencyMs": 47972,
+      "totalCostUSD": 0.0005163699999999999,
+      "integrationsDetected": [
+        "jira",
+        "google_sheets"
+      ],
+      "error": null
+    },
+    {
+      "prompt": "An app.",
+      "jobId": "cc3e5864-df86-4f27-829e-97565d979c2b",
+      "status": "completed",
+      "failedStage": null,
+      "retryCount": 1,
+      "repairStrategies": [
+        "field_repair",
+        "field_repair"
+      ],
+      "totalLatencyMs": 5007,
+      "totalCostUSD": 0.0000265,
+      "integrationsDetected": [],
+      "error": null
+    },
+    {
+      "prompt": "Build something like Notion for doctors.",
+      "jobId": "dbdec99c-5d43-4a90-83a2-e8bd4ed4d213",
+      "status": "completed",
+      "failedStage": null,
+      "retryCount": 0,
+      "repairStrategies": [
+        "consistency_repair"
+      ],
+      "totalLatencyMs": 51823,
+      "totalCostUSD": 0.00040820000000000006,
+      "integrationsDetected": [
+        "webhook"
+      ],
+      "error": null
+    },
+    {
+      "prompt": "A platform with login, payments, roles, real-time chat, file uploads, native mobile, analytics, and a marketplace.",
+      "jobId": "1360a6e0-21a7-4291-bd31-d9907002e9da",
+      "status": "completed",
+      "failedStage": null,
+      "retryCount": 0,
+      "repairStrategies": [
+        "consistency_repair"
+      ],
+      "totalLatencyMs": 51354,
+      "totalCostUSD": 0.00056438,
+      "integrationsDetected": [
+        "stripe"
+      ],
+      "error": null
+    },
+    {
+      "prompt": "A CRM but also a project manager but also an invoicing tool.",
+      "jobId": "26b5aade-0f65-4532-94ac-75a9bae616f2",
+      "status": "completed",
+      "failedStage": null,
+      "retryCount": 0,
+      "repairStrategies": [
+        "consistency_repair"
+      ],
+      "totalLatencyMs": 149092,
+      "totalCostUSD": 0.00036950000000000004,
+      "integrationsDetected": [
+        "stripe"
+      ],
+      "error": null
+    },
+    {
+      "prompt": "Task manager, but make it smart.",
+      "jobId": "8571512b-8b75-40e0-876b-850c07e3f9f6",
+      "status": "completed",
+      "failedStage": null,
+      "retryCount": 0,
+      "repairStrategies": [],
+      "totalLatencyMs": 2360,
+      "totalCostUSD": 0.0000305,
+      "integrationsDetected": [
+        "gmail"
+      ],
+      "error": null
+    }
+  ]
+}

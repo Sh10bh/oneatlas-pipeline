@@ -1,6 +1,7 @@
 import { gatewayCall, extractJSON } from '../gateway';
 import { ROUTING_CONFIG, applyStagePolicy } from '../config/model-routing';
 import { validateAppSpec } from '../validation';
+import { normalizeAppSpecInput, normalizeRequestedIntegrations } from '../validation/normalize-appspec';
 import { structuralRepair, fieldRepair, consistencyRepair, repromptRepair } from '../repair/strategies';
 import { integrationRegistry } from '../integrations/registry';
 import type { AppIntent } from '../types/AppIntent';
@@ -8,6 +9,7 @@ import type { DataSchema } from '../types/DataSchema';
 import type { AppSpec } from '../types/AppSpec';
 import type { StageCost } from '../types/JobState';
 import type { RepairLog } from '../types/RepairLog';
+import type { ValidationErrorDetail } from '../validation';
 
 const SYSTEM_PROMPT = `You are an AI that generates complete application specifications from database schemas.
 Return ONLY valid JSON — no explanation, no markdown fences.
@@ -23,13 +25,35 @@ Structure:
 Rules:
 - Every page MUST have at least one apiEndpoint with the same boundEntity
 - Every workflowStub must reference an entity that exists in the schema
-- Integration IDs must be from: slack, stripe, whatsapp, gmail, jira, github, hubspot, webhook, notion, airtable, salesforce, twilio-sms, zapier, sheets`;
+- authRules.permissions[].entity MUST be an exact entity name from the schema (never "Setting" or other invented names)
+- integrationId and workflow integration MUST be lowercase registry ids: slack, stripe, whatsapp, gmail, jira, github, hubspot, webhook, notion, airtable, salesforce, twilio-sms, zapier, google_sheets
+- Create at least one workflowStub per requested integration using lowercase ids`;
 
 export interface AppSpecGenerationResult {
   appSpec: AppSpec;
   cost: StageCost;
   repairLogs: RepairLog[];
   retryCount: number;
+}
+
+function runRepairPass(
+  parsed: Record<string, unknown>,
+  errors: ValidationErrorDetail[],
+  schema: DataSchema,
+  repairLogs: RepairLog[],
+): Record<string, unknown> {
+  const knownEntities = schema.entities.map((e) => e.name);
+  let data = parsed;
+
+  const consistencyFix = consistencyRepair(data, errors, 'appspec_generation', knownEntities);
+  repairLogs.push(consistencyFix.log);
+  if (consistencyFix.repaired) data = consistencyFix.data as Record<string, unknown>;
+
+  const fieldFix = fieldRepair(data, errors, 'appspec_generation');
+  repairLogs.push(fieldFix.log);
+  if (fieldFix.repaired) data = fieldFix.data as Record<string, unknown>;
+
+  return normalizeAppSpecInput(data, schema);
 }
 
 export async function generateAppSpec(
@@ -39,6 +63,7 @@ export async function generateAppSpec(
   const cfg = applyStagePolicy(ROUTING_CONFIG.appspecGeneration);
   const repairLogs: RepairLog[] = [];
   let retryCount = 0;
+  const requestedIntegrations = normalizeRequestedIntegrations(intent.integrations_requested ?? []);
 
   const entitySummary = schema.entities
     .map(e => `${e.name} (fields: ${e.fields.map(f => f.name).join(', ')})`)
@@ -51,9 +76,9 @@ export async function generateAppSpec(
   const userPrompt = `Generate a complete AppSpec for:
 App: ${intent.appName} (${intent.appType})
 Features: ${intent.features.join(', ')}
-Integrations requested: ${intent.integrations_requested.join(', ') || 'none'}
+Integrations requested (use these exact lowercase ids): ${requestedIntegrations.join(', ') || 'none'}
 
-Entities in schema:
+Entities in schema (ONLY use these in authRules.permissions.entity and workflow triggers):
 ${entitySummary}
 
 Available integrations and their actions:
@@ -74,45 +99,37 @@ Every page must have a corresponding API endpoint.`;
     parsed = repair.repaired ? repair.data : {};
   }
 
-  let validation = validateAppSpec(parsed, schema, intent.integrations_requested);
+  let data = normalizeAppSpecInput(parsed as Record<string, unknown>, schema, requestedIntegrations);
+  let validation = validateAppSpec(data, schema, requestedIntegrations);
 
-  if (!validation.success) {
-    const knownEntities = schema.entities.map(e => e.name);
-    const consistencyFix = consistencyRepair(
-      parsed as Record<string, unknown>,
-      validation.errors,
-      'appspec_generation',
-      knownEntities,
-    );
-    repairLogs.push(consistencyFix.log);
-    if (consistencyFix.repaired) {
-      validation = validateAppSpec(consistencyFix.data, schema, intent.integrations_requested);
-      parsed = consistencyFix.data;
-    }
-  }
-
-  if (!validation.success) {
-    const fieldFix = fieldRepair(
-      parsed as Record<string, unknown>,
-      validation.errors,
-      'appspec_generation',
-    );
-    repairLogs.push(fieldFix.log);
-    if (fieldFix.repaired) {
-      validation = validateAppSpec(fieldFix.data, schema, intent.integrations_requested);
-      parsed = fieldFix.data;
-    }
+  for (let attempt = 0; !validation.success && attempt < 3; attempt++) {
+    data = runRepairPass(data, validation.errors, schema, repairLogs);
+    validation = validateAppSpec(data, schema, requestedIntegrations);
   }
 
   if (!validation.success) {
     retryCount++;
-    const reprompt = await repromptRepair(rawText, validation.errors, 'appspec_generation', SYSTEM_PROMPT, response.cost);
+    const reprompt = await repromptRepair(
+      rawText,
+      validation.errors,
+      'appspec_generation',
+      SYSTEM_PROMPT,
+      response.cost,
+    );
     repairLogs.push(reprompt.log);
     if (reprompt.repaired) {
-      validation = validateAppSpec(reprompt.data, schema, intent.integrations_requested);
-      parsed = reprompt.data;
+      data = normalizeAppSpecInput(reprompt.data as Record<string, unknown>, schema, requestedIntegrations);
+      validation = validateAppSpec(data, schema, requestedIntegrations);
+      if (!validation.success) {
+        data = runRepairPass(data, validation.errors, schema, repairLogs);
+        validation = validateAppSpec(data, schema, requestedIntegrations);
+      }
     }
   }
+
+  // Final deterministic pass — should clear auth + slack casing issues
+  data = normalizeAppSpecInput(data, schema, requestedIntegrations);
+  validation = validateAppSpec(data, schema, requestedIntegrations);
 
   if (!validation.success) {
     throw new Error(`AppSpec generation failed after repairs: ${JSON.stringify(validation.errors)}`);

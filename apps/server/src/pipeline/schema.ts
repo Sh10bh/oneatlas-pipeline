@@ -26,15 +26,62 @@ Return ONLY valid JSON matching this exact structure — no explanation, no mark
 }
 Rules:
 - EVERY entity MUST have a tenantId field
-- Relations must be bidirectionally consistent (if A hasMany B, B must belongsTo A)
+- Relations MUST be bidirectionally consistent. If A hasMany B then B MUST have belongsTo A. If Supplier hasMany Product then Product MUST have belongsTo Supplier. If Payment belongsTo Order then Order MUST have hasMany Payment.
 - tableName must be snake_case
-- Include id (uuid, primary) and tenantId on every entity`;
+- Include id (uuid, primary) and tenantId on every entity
+- Double check every relation has its inverse before returning`;
 
 export interface SchemaGenerationResult {
   schema: DataSchema;
   cost: StageCost;
   repairLogs: RepairLog[];
   retryCount: number;
+}
+
+async function runSchemaRepairPasses(
+  parsed: unknown,
+  repairLogs: RepairLog[],
+  maxPasses: number = 4,
+): Promise<{ parsed: unknown; valid: boolean; errors: Array<{ field: string; message: string; code: string }> }> {
+  let data = parsed;
+  let validation = validateDataSchema(data);
+
+  for (let attempt = 0; !validation.success && attempt < maxPasses; attempt++) {
+    // Always try consistency repair first — fixes missing_inverse_relation
+    const consistencyFix = consistencyRepair(
+      data as Record<string, unknown>,
+      validation.errors,
+      'schema_generation',
+    );
+    repairLogs.push(consistencyFix.log);
+    if (consistencyFix.repaired) {
+      data = consistencyFix.data;
+      validation = validateDataSchema(data);
+      if (validation.success) break;
+    }
+
+    // Then field repair for missing fields
+    const fieldFix = fieldRepair(
+      data as Record<string, unknown>,
+      validation.errors,
+      'schema_generation',
+    );
+    repairLogs.push(fieldFix.log);
+    if (fieldFix.repaired) {
+      data = fieldFix.data;
+      validation = validateDataSchema(data);
+      if (validation.success) break;
+    }
+
+    // If neither repaired anything this pass, stop early
+    if (!consistencyFix.repaired && !fieldFix.repaired) break;
+  }
+
+  return {
+    parsed: data,
+    valid: validation.success,
+    errors: validation.success ? [] : validation.errors,
+  };
 }
 
 export async function generateSchema(intent: AppIntent): Promise<SchemaGenerationResult> {
@@ -47,10 +94,15 @@ App Name: ${intent.appName}
 App Type: ${intent.appType}
 Entities needed: ${intent.entities.join(', ')}
 Features: ${intent.features.join(', ')}
-Assumptions: ${intent.assumptions.join(', ')}`;
+Assumptions: ${intent.assumptions.join(', ')}
+
+IMPORTANT: Every relation must have its inverse. Examples:
+- If Supplier hasMany Product → Product must have belongsTo Supplier
+- If Order hasMany Payment → Payment must have belongsTo Order
+- If Project hasMany Task → Task must have belongsTo Project`;
 
   const response = await gatewayCall(cfg.primary, cfg.fallback, SYSTEM_PROMPT, userPrompt);
-  let rawText = response.text;
+  const rawText = response.text;
 
   let parsed: unknown;
   try {
@@ -61,46 +113,35 @@ Assumptions: ${intent.assumptions.join(', ')}`;
     parsed = repair.repaired ? repair.data : {};
   }
 
-  let validation = validateDataSchema(parsed);
+  // Run up to 4 repair passes on initial output
+  let result = await runSchemaRepairPasses(parsed, repairLogs, 4);
 
-  if (!validation.success) {
-    // Try field repair first
-    const fieldFix = fieldRepair(parsed as Record<string, unknown>, validation.errors, 'schema_generation');
-    repairLogs.push(fieldFix.log);
-    if (fieldFix.repaired) {
-      validation = validateDataSchema(fieldFix.data);
-      parsed = fieldFix.data;
-    }
-  }
-
-  if (!validation.success) {
-    // Try consistency repair
-    const consistencyFix = consistencyRepair(
-      parsed as Record<string, unknown>,
-      validation.errors,
-      'schema_generation',
-    );
-    repairLogs.push(consistencyFix.log);
-    if (consistencyFix.repaired) {
-      validation = validateDataSchema(consistencyFix.data);
-      parsed = consistencyFix.data;
-    }
-  }
-
-  if (!validation.success) {
-    // Final re-prompt
+  // Only reprompt if still failing after all repair passes
+  if (!result.valid) {
     retryCount++;
-    const reprompt = await repromptRepair(rawText, validation.errors, 'schema_generation', SYSTEM_PROMPT, response.cost);
+    const reprompt = await repromptRepair(
+      rawText,
+      result.errors,
+      'schema_generation',
+      SYSTEM_PROMPT,
+      response.cost,
+    );
     repairLogs.push(reprompt.log);
+
     if (reprompt.repaired) {
-      validation = validateDataSchema(reprompt.data);
-      parsed = reprompt.data;
+      // Run repair passes on reprompted output too
+      result = await runSchemaRepairPasses(reprompt.data, repairLogs, 4);
     }
   }
 
-  if (!validation.success) {
-    throw new Error(`Schema generation failed after repairs: ${JSON.stringify(validation.errors)}`);
+  if (!result.valid) {
+    throw new Error(`Schema generation failed after repairs: ${JSON.stringify(result.errors)}`);
   }
 
-  return { schema: validation.data, cost: response.cost, repairLogs, retryCount };
+  const finalValidation = validateDataSchema(result.parsed);
+  if (!finalValidation.success) {
+    throw new Error(`Schema generation failed after repairs: ${JSON.stringify(finalValidation.errors)}`);
+  }
+
+  return { schema: finalValidation.data, cost: response.cost, repairLogs, retryCount };
 }

@@ -32,12 +32,25 @@ class IntegrationRegistry {
 export const integrationRegistry = new IntegrationRegistry();
 
 // These two functions are used by the validation engine
+export function resolveIntegrationId(id: string): string | undefined {
+  const trimmed = id.trim();
+  if (integrationRegistry.get(trimmed)) return trimmed;
+  const lower = trimmed.toLowerCase();
+  for (const integration of integrationRegistry.getAll()) {
+    if (integration.id === lower) return integration.id;
+    if (integration.displayName.toLowerCase() === lower) return integration.id;
+  }
+  return undefined;
+}
+
 export function isValidIntegrationId(id: string): boolean {
-  return integrationRegistry.has(id);
+  return Boolean(resolveIntegrationId(id));
 }
 
 export function isValidActionId(integrationId: string, actionId: string): boolean {
-  const integration = integrationRegistry.get(integrationId);
+  const resolved = resolveIntegrationId(integrationId);
+  if (!resolved) return false;
+  const integration = integrationRegistry.get(resolved);
   if (!integration) return false;
   return integration.actions.some((a) => a.id === actionId);
 }

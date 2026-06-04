@@ -4,6 +4,7 @@ import { AppIntent } from '../types/AppIntent';
 import { DataSchema } from '../types/DataSchema';
 import { AppSpec } from '../types/AppSpec';
 import { isValidIntegrationId, isValidActionId } from '../integrations/registry';
+import { normalizeIntegrationId, normalizeRequestedIntegrations } from './normalize-appspec';
 
 export type ValidationErrorDetail = {
   field: string;
@@ -152,6 +153,10 @@ export function validateAppSpec(
 
   // Integration registry validation — hard errors, no silent fallback
   for (const hook of spec.integrationHooks) {
+    const hookIntegrationId = normalizeIntegrationId(hook.integrationId);
+    if (hook.integrationId !== hookIntegrationId) {
+      (hook as { integrationId: string }).integrationId = hookIntegrationId;
+    }
     if (!isValidIntegrationId(hook.integrationId)) {
       extraErrors.push({
         field: `integrationHooks.${hook.integrationId}`,
@@ -168,6 +173,10 @@ export function validateAppSpec(
   }
 
   for (const stub of spec.workflowStubs) {
+    const stubIntegration = normalizeIntegrationId(stub.integration);
+    if (stub.integration !== stubIntegration) {
+      (stub as { integration: string }).integration = stubIntegration;
+    }
     if (!isValidIntegrationId(stub.integration)) {
       extraErrors.push({
         field: `workflowStubs.${stub.name}.integration`,
@@ -184,8 +193,10 @@ export function validateAppSpec(
   }
 
   if (requestedIntegrations && requestedIntegrations.length > 0) {
-    const integrationSet = new Set(spec.workflowStubs.map((stub) => stub.integration));
-    for (const integration of requestedIntegrations) {
+    const integrationSet = new Set(
+      spec.workflowStubs.map((stub) => normalizeIntegrationId(stub.integration)),
+    );
+    for (const integration of normalizeRequestedIntegrations(requestedIntegrations)) {
       if (!integrationSet.has(integration)) {
         extraErrors.push({
           field: `workflowStubs.${integration}`,

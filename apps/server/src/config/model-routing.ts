@@ -33,23 +33,24 @@ export interface RoutingConfig {
 
 export const ROUTING_CONFIG: RoutingConfig = {
   intentExtraction: {
-    primary: { provider: 'groq', model: 'llama3-8b-8192', maxTokens: 1000 },
-    fallback: { provider: 'openrouter', model: 'meta-llama/llama-3-8b-instruct', maxTokens: 1000 },
+    primary: { provider: 'groq', model: 'llama-3.3-70b-versatile', maxTokens: 1000 },
+    fallback: { provider: 'openrouter', model: 'meta-llama/llama-3.3-70b-instruct', maxTokens: 1000 },
     policy: { maxEstimatedCostUsd: 0.01, maxLatencyMs: 6000 },
   },
   schemaGeneration: {
-    primary: { provider: 'anthropic', model: 'claude-haiku-4-5-20251001', maxTokens: 4000 },
-    fallback: { provider: 'openrouter', model: 'anthropic/claude-haiku-4-5', maxTokens: 4000 },
+    // Groq primary (working in your account); OpenAI/OpenRouter only if Groq rate-limits
+    primary: { provider: 'groq', model: 'llama-3.3-70b-versatile', maxTokens: 4000 },
+    fallback: { provider: 'openrouter', model: 'meta-llama/llama-3.3-70b-instruct', maxTokens: 4000 },
     policy: { maxEstimatedCostUsd: 0.15, maxLatencyMs: 16000 },
   },
   appspecGeneration: {
-    primary: { provider: 'anthropic', model: 'claude-haiku-4-5-20251001', maxTokens: 6000 },
-    fallback: { provider: 'openrouter', model: 'openai/gpt-4o-mini', maxTokens: 6000 },
+    primary: { provider: 'groq', model: 'llama-3.3-70b-versatile', maxTokens: 6000 },
+    fallback: { provider: 'openrouter', model: 'meta-llama/llama-3.3-70b-instruct', maxTokens: 6000 },
     policy: { maxEstimatedCostUsd: 0.20, maxLatencyMs: 22000 },
   },
   repair: {
-    primary: { provider: 'groq', model: 'llama3-8b-8192', maxTokens: 2000 },
-    fallback: { provider: 'openrouter', model: 'meta-llama/llama-3-8b-instruct', maxTokens: 2000 },
+    primary: { provider: 'groq', model: 'llama-3.3-70b-versatile', maxTokens: 2000 },
+    fallback: { provider: 'openrouter', model: 'meta-llama/llama-3.3-70b-instruct', maxTokens: 2000 },
   },
 };
 
@@ -59,14 +60,14 @@ export const COST_TABLE: Record<string, { input: number; output: number }> = {
   'openai/gpt-4o-mini':                     { input: 0.15,  output: 0.60  },
   'anthropic/claude-sonnet-4-20250514':     { input: 3.00,  output: 15.00 },
   'anthropic/claude-haiku-4-5-20251001':    { input: 0.80,  output: 4.00  },
-  'groq/llama3-8b-8192':                    { input: 0.05,  output: 0.10  },
+  'groq/llama-3.3-70b-versatile':           { input: 0.59,  output: 0.79  },
   'groq/mixtral-8x7b-32768':               { input: 0.24,  output: 0.24  },
   'deepseek/deepseek-chat':                 { input: 0.14,  output: 0.28  },
   'mistral/mistral-large-latest':           { input: 4.00,  output: 12.00 },
   'mistral/mistral-7b':                     { input: 0.25,  output: 0.25  },
   'google/gemini-1.5-flash':               { input: 0.075, output: 0.30  },
   'google/gemini-1.5-pro':                 { input: 3.50,  output: 10.50 },
-  'openrouter/meta-llama/llama-3-8b-instruct': { input: 0.06, output: 0.06 },
+  'openrouter/meta-llama/llama-3.3-70b-instruct': { input: 0.10, output: 0.10 },
 };
 
 export function estimateCost(

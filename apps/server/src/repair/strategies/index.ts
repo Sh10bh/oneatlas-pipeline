@@ -5,6 +5,7 @@ import { gatewayCall, extractJSON } from '../../gateway';
 import { ROUTING_CONFIG, type ModelConfig } from '../../config/model-routing';
 import type { StageCost } from '../../types/JobState';
 import { integrationRegistry } from '../../integrations/registry';
+import { normalizeIntegrationId } from '../../validation/normalize-appspec';
 
 export interface RepairResult {
   repaired: boolean;
@@ -69,8 +70,148 @@ function makeLog(
   };
 }
 
+// ─── Integration + Action alias tables ───────────────────────────────────────
+
+const INTEGRATION_ALIASES: Record<string, string> = {
+  // email variants
+  email: 'gmail',
+  'email-service': 'gmail',
+  'email-notifications': 'gmail',
+  'email_service': 'gmail',
+  'email_notifications': 'gmail',
+  'google-mail': 'gmail',
+  google_mail: 'gmail',
+  'google-workspace': 'gmail',
+  google_workspace: 'gmail',
+  // sheets variants — FIX: all map to canonical registry id 'google_sheets'
+  sheets: 'google_sheets',
+  google_sheets: 'google_sheets',
+  google_sheet: 'google_sheets',
+  'google-sheets': 'google_sheets',
+  'google-sheet': 'google_sheets',
+  googlesheets: 'google_sheets',
+  // whatsapp variants
+  'whatsapp-api': 'whatsapp',
+  whatsapp_api: 'whatsapp',
+  whatsapp_business: 'whatsapp',
+  'whatsapp-business': 'whatsapp',
+  'whatsapp_notifications': 'whatsapp',
+  'whatsapp-notifications': 'whatsapp',
+  // twilio variants
+  sms: 'twilio-sms',
+  twilio: 'twilio-sms',
+  twilio_sms: 'twilio-sms',
+  'twilio_notifications': 'twilio-sms',
+  // payment variants
+  'payment-gateways': 'stripe',
+  payment_gateways: 'stripe',
+  payments: 'stripe',
+  'payment-gateway': 'stripe',
+  payment_gateway: 'stripe',
+  'stripe-payments': 'stripe',
+  // storage/drive
+  'google-drive': 'webhook',
+  google_drive: 'webhook',
+  'file-storage': 'webhook',
+  'file-storage-services': 'webhook',
+  file_storage: 'webhook',
+  s3: 'webhook',
+  'aws-s3': 'webhook',
+  'file-uploads': 'webhook',
+  file_uploads: 'webhook',
+  // calendar
+  'google-calendar': 'gmail',
+  google_calendar: 'gmail',
+  calendar: 'gmail',
+  // health/medical
+  'electronic-health-records': 'webhook',
+  'electronic-health-record': 'webhook',
+  'electronic-health-record-systems': 'webhook',
+  'electronic-health-records-systems': 'webhook',
+  ehr: 'webhook',
+  'medical-records': 'webhook',
+  medical_records: 'webhook',
+  'electronic-health-records-(ehr)-systems': 'webhook',
+  'electronic-health-records-(ehr)': 'webhook',
+  // analytics
+  'analytics-tools': 'webhook',
+  analytics_tools: 'webhook',
+  'analytics-service': 'webhook',
+  analytics_service: 'webhook',
+  'analytics-platform': 'webhook',
+  analytics: 'webhook',
+  // chat
+  'real-time-chat': 'webhook',
+  real_time_chat: 'webhook',
+  'chat-service': 'webhook',
+  chat_service: 'webhook',
+  chat: 'webhook',
+  // marketplace
+  marketplace: 'webhook',
+  'marketplace-service': 'webhook',
+  // generic notifications
+  notifications: 'webhook',
+  'push-notifications': 'webhook',
+  push_notifications: 'webhook',
+};
+
+const ACTION_ALIASES: Record<string, Record<string, string>> = {
+  whatsapp: {
+    send_message: 'send_template_message',
+    'send-message': 'send_template_message',
+    sendMessage: 'send_template_message',
+    notify: 'send_template_message',
+    send_notification: 'send_template_message',
+    sendNotification: 'send_template_message',
+    send: 'send_template_message',
+  },
+  stripe: {
+    'create-charge': 'create_charge',
+    createCharge: 'create_charge',
+    charge: 'create_charge',
+    'create-customer': 'create_customer',
+    createCustomer: 'create_customer',
+    'process-payment': 'create_charge',
+    processPayment: 'create_charge',
+    'create-subscription': 'create_subscription',
+    createSubscription: 'create_subscription',
+  },
+  slack: {
+    'send-message': 'send_channel_message',
+    sendMessage: 'send_channel_message',
+    notify: 'send_channel_message',
+    send_message: 'send_channel_message',
+    'post-message': 'send_channel_message',
+    postMessage: 'send_channel_message',
+    send: 'send_channel_message',
+  },
+  gmail: {
+    send: 'send_email',
+    'send-email': 'send_email',
+    sendEmail: 'send_email',
+    email: 'send_email',
+    'send-mail': 'send_email',
+    sendMail: 'send_email',
+    notify: 'send_email',
+  },
+  jira: {
+    'create-issue': 'create_issue',
+    createIssue: 'create_issue',
+    'create-ticket': 'create_issue',
+    createTicket: 'create_issue',
+    'update-issue': 'update_issue_status',
+    updateIssue: 'update_issue_status',
+  },
+  webhook: {
+    send: 'post_payload',
+    trigger: 'post_payload',
+    'send-payload': 'post_payload',
+    sendPayload: 'post_payload',
+    notify: 'post_payload',
+  },
+};
+
 // ─── Strategy 1: Structural repair ───────────────────────────────────────────
-// Handles malformed/truncated JSON by extracting valid portion + filling defaults
 
 export function structuralRepair(rawText: string, stage: StageName): RepairResult {
   const errorInput = rawText.slice(0, 200);
@@ -84,10 +225,8 @@ export function structuralRepair(rawText: string, stage: StageName): RepairResul
         'Extracted valid JSON from malformed/fenced response'),
     };
   } catch {
-    // Try to find any partial object and return it
     const partialMatch = rawText.match(/\{[\s\S]*/);
     if (partialMatch) {
-      // Attempt to close unclosed braces
       let partial = partialMatch[0];
       const opens = (partial.match(/\{/g) ?? []).length;
       const closes = (partial.match(/\}/g) ?? []).length;
@@ -112,7 +251,6 @@ export function structuralRepair(rawText: string, stage: StageName): RepairResul
 }
 
 // ─── Strategy 2: Field repair ─────────────────────────────────────────────────
-// Handles missing/wrongly-typed fields by filling in typed defaults
 
 export function fieldRepair(
   data: Record<string, unknown>,
@@ -125,7 +263,6 @@ export function fieldRepair(
 
   for (const err of errors) {
     const field = err.field;
-    // Supply typed defaults based on field name patterns
     if (field.includes('appName') && !patched.appName) {
       patched.appName = 'GeneratedApp'; repairedCount++;
     } else if (field.includes('appType') && !patched.appType) {
@@ -169,7 +306,6 @@ export function fieldRepair(
 }
 
 // ─── Strategy 3: Consistency repair ──────────────────────────────────────────
-// Fixes broken cross-layer references programmatically where possible
 
 export function consistencyRepair(
   data: Record<string, unknown>,
@@ -178,11 +314,12 @@ export function consistencyRepair(
   knownEntities?: string[],
 ): RepairResult {
   const errorInput = JSON.stringify(errors).slice(0, 200);
-  const patched = JSON.parse(JSON.stringify(data)); // deep clone
+  const patched = JSON.parse(JSON.stringify(data));
   let repairedCount = 0;
 
   for (const err of errors) {
-    // Fix page_missing_api: add a stub endpoint for orphaned pages
+
+    // Fix page_missing_api
     if (err.code === 'page_missing_api' && Array.isArray(patched.pages) && Array.isArray(patched.apiEndpoints)) {
       const pageNameMatch = err.message.match(/Page "([^"]+)"/);
       const entityMatch = err.message.match(/entity: ([^\)]+)\)/);
@@ -200,7 +337,69 @@ export function consistencyRepair(
       }
     }
 
-    // Fix invalid_workflow_entity: remove stubs referencing unknown entities
+    // FIX: invalid field type values — map SQL/unsupported types to our enum
+    // THIS BLOCK WAS PREVIOUSLY NESTED INSIDE page_missing_api — now correctly top-level
+    if (err.code === 'invalid_enum_value' && err.field.includes('.type') && Array.isArray(patched.entities)) {
+      const TYPE_MAP: Record<string, string> = {
+        varchar: 'string',
+        'character varying': 'string',
+        char: 'string',
+        nvarchar: 'string',
+        text: 'text',
+        integer: 'number',
+        int: 'number',
+        int4: 'number',
+        int8: 'number',
+        bigint: 'number',
+        smallint: 'number',
+        float: 'number',
+        double: 'number',
+        decimal: 'number',
+        numeric: 'number',
+        real: 'number',
+        timestamp: 'datetime',
+        'timestamp without time zone': 'datetime',
+        'timestamp with time zone': 'datetime',
+        timestamptz: 'datetime',
+        datetime: 'datetime',
+        bool: 'boolean',
+        tinyint: 'boolean',
+        jsonb: 'json',
+        array: 'json',
+      };
+      for (const entity of patched.entities) {
+        if (!Array.isArray(entity.fields)) continue;
+        for (const field of entity.fields) {
+          if (field.type && TYPE_MAP[field.type]) {
+            field.type = TYPE_MAP[field.type];
+            repairedCount++;
+          }
+        }
+      }
+    }
+
+    // FIX: invalid relation type values — map unsupported types to our enum
+    if (err.code === 'invalid_enum_value' && err.field.includes('.relations.') && Array.isArray(patched.entities)) {
+      const RELATION_TYPE_MAP: Record<string, string> = {
+        belongsToMany: 'hasMany',
+        manyToMany: 'hasMany',
+        many_to_many: 'hasMany',
+        'many-to-many': 'hasMany',
+        hasAndBelongsToMany: 'hasMany',
+        through: 'hasMany',
+      };
+      for (const entity of patched.entities) {
+        if (!Array.isArray(entity.relations)) continue;
+        for (const rel of entity.relations) {
+          if (rel.type && RELATION_TYPE_MAP[rel.type]) {
+            rel.type = RELATION_TYPE_MAP[rel.type];
+            repairedCount++;
+          }
+        }
+      }
+    }
+
+    // Fix invalid_workflow_entity
     if (err.code === 'invalid_workflow_entity' && Array.isArray(patched.workflowStubs) && knownEntities) {
       patched.workflowStubs = patched.workflowStubs.filter(
         (s: { trigger?: { entity?: string } }) => knownEntities.includes(s.trigger?.entity ?? '')
@@ -208,23 +407,67 @@ export function consistencyRepair(
       repairedCount++;
     }
 
-    // Fix unregistered_integration: remove hooks/stubs with bad integration IDs
+    // Fix unregistered_integration — normalize aliases, then remove still-invalid ones
     if (err.code === 'unregistered_integration') {
-      if (Array.isArray(patched.integrationHooks)) {
-        const before = patched.integrationHooks.length;
-        patched.integrationHooks = patched.integrationHooks.filter(
-          (h: { integrationId?: string }) => h.integrationId !== err.field.split('.')[1]
-        );
-        if (patched.integrationHooks.length < before) repairedCount++;
-      }
       if (Array.isArray(patched.workflowStubs)) {
+        for (const stub of patched.workflowStubs) {
+          if (stub.integration && INTEGRATION_ALIASES[stub.integration]) {
+            stub.integration = INTEGRATION_ALIASES[stub.integration];
+            repairedCount++;
+          }
+        }
         patched.workflowStubs = patched.workflowStubs.filter(
-          (s: { integration?: string }) => s.integration !== undefined
+          (s: { integration?: string }) =>
+            !s.integration || integrationRegistry.has(s.integration)
+        );
+      }
+      if (Array.isArray(patched.integrationHooks)) {
+        for (const hook of patched.integrationHooks) {
+          if (hook.integrationId && INTEGRATION_ALIASES[hook.integrationId]) {
+            hook.integrationId = INTEGRATION_ALIASES[hook.integrationId];
+            repairedCount++;
+          }
+        }
+        patched.integrationHooks = patched.integrationHooks.filter(
+          (h: { integrationId?: string }) =>
+            !h.integrationId || integrationRegistry.has(h.integrationId)
         );
       }
     }
 
-    // Fix missing_tenant_id: add tenantId field to entities
+    // Fix invalid_integration_action — map wrong action names to valid ones
+    if (err.code === 'invalid_integration_action') {
+      if (Array.isArray(patched.integrationHooks)) {
+        for (const hook of patched.integrationHooks) {
+          const aliases = ACTION_ALIASES[hook.integrationId] ?? {};
+          if (hook.actionId && aliases[hook.actionId]) {
+            hook.actionId = aliases[hook.actionId];
+            repairedCount++;
+          } else if (hook.actionId && !integrationRegistry.get(hook.integrationId)?.actions.some(
+            (a: { id: string }) => a.id === hook.actionId
+          )) {
+            const firstAction = integrationRegistry.get(hook.integrationId)?.actions[0]?.id;
+            if (firstAction) { hook.actionId = firstAction; repairedCount++; }
+          }
+        }
+      }
+      if (Array.isArray(patched.workflowStubs)) {
+        for (const stub of patched.workflowStubs) {
+          const aliases = ACTION_ALIASES[stub.integration] ?? {};
+          if (stub.action && aliases[stub.action]) {
+            stub.action = aliases[stub.action];
+            repairedCount++;
+          } else if (stub.action && !integrationRegistry.get(stub.integration)?.actions.some(
+            (a: { id: string }) => a.id === stub.action
+          )) {
+            const firstAction = integrationRegistry.get(stub.integration)?.actions[0]?.id;
+            if (firstAction) { stub.action = firstAction; repairedCount++; }
+          }
+        }
+      }
+    }
+
+    // Fix missing_tenant_id
     if (err.code === 'missing_tenant_id' && Array.isArray(patched.entities)) {
       for (const entity of patched.entities) {
         const hasTenant = entity.fields?.some((f: { name: string }) => f.name === 'tenantId');
@@ -243,9 +486,47 @@ export function consistencyRepair(
       }
     }
 
-    // Fix missing_requested_workflow_stub: append minimal stub/hook for integration
+    // Fix missing_inverse_relation
+    if (err.code === 'missing_inverse_relation' && Array.isArray(patched.entities)) {
+      const match = err.message.match(/Relation from "([^"]+)" to "([^"]+)"/);
+      if (match) {
+        const [, fromEntity, toEntity] = match;
+        const targetEnt = patched.entities.find((e: { name: string }) => e.name === toEntity);
+        if (targetEnt) {
+          targetEnt.relations = targetEnt.relations ?? [];
+          const alreadyHas = targetEnt.relations.some(
+            (r: { target: string }) => r.target === fromEntity
+          );
+          if (!alreadyHas) {
+            targetEnt.relations.push({
+              type: 'hasMany',
+              target: fromEntity,
+              foreignKey: `${fromEntity.charAt(0).toLowerCase() + fromEntity.slice(1)}Id`,
+              onDelete: 'CASCADE',
+            });
+            repairedCount++;
+          }
+        }
+      }
+    }
+
+    // Fix invalid_auth_entity
+    if (err.code === 'invalid_auth_entity' && Array.isArray(patched.authRules) && knownEntities) {
+      const entityMatch = err.message.match(/entity "([^"]+)"/);
+      const badEntity = entityMatch?.[1];
+      const fallbackEntity = knownEntities[0];
+      for (const rule of patched.authRules as Array<{ role: string; permissions: Array<{ entity: string }> }>) {
+        rule.permissions = rule.permissions.filter((p) => p.entity !== badEntity);
+        if (rule.permissions.length === 0) {
+          rule.permissions.push({ entity: fallbackEntity, actions: ['read', 'write'] });
+        }
+      }
+      repairedCount++;
+    }
+
+    // Fix missing_requested_workflow_stub
     if (err.code === 'missing_requested_workflow_stub') {
-      const integrationId = err.field.split('.')[1];
+      const integrationId = normalizeIntegrationId(err.field.split('.')[1] ?? '');
       const fallbackAction = integrationRegistry.get(integrationId)?.actions[0]?.id ?? 'default_action';
       const firstEntity = Array.isArray((patched as { pages?: Array<{ boundEntity?: string }> }).pages)
         ? (patched as { pages: Array<{ boundEntity?: string }> }).pages[0]?.boundEntity
@@ -271,6 +552,40 @@ export function consistencyRepair(
         });
       }
     }
+
+    // Fix invalid page layout values
+    if (err.code === 'invalid_enum_value' && err.field.includes('layout') && Array.isArray(patched.pages)) {
+      const layoutMap: Record<string, string> = {
+        form: 'detail',
+        grid: 'list',
+        table: 'list',
+        kanban: 'list',
+        calendar: 'dashboard',
+        analytics: 'dashboard',
+        overview: 'dashboard',
+        report: 'dashboard',
+      };
+      for (const page of patched.pages) {
+        if (page.layout && layoutMap[page.layout]) {
+          page.layout = layoutMap[page.layout];
+          repairedCount++;
+        }
+      }
+    }
+
+    // Fix payload values that are objects/arrays instead of strings
+    if (err.code === 'invalid_type' && err.field.includes('payload') && Array.isArray(patched.workflowStubs)) {
+      for (const stub of patched.workflowStubs) {
+        if (stub.payload && typeof stub.payload === 'object') {
+          const flatPayload: Record<string, string> = {};
+          for (const [k, v] of Object.entries(stub.payload as Record<string, unknown>)) {
+            flatPayload[k] = typeof v === 'string' ? v : JSON.stringify(v);
+          }
+          stub.payload = flatPayload;
+          repairedCount++;
+        }
+      }
+    }
   }
 
   if (repairedCount > 0) {
@@ -291,7 +606,6 @@ export function consistencyRepair(
 }
 
 // ─── Re-prompt repair ─────────────────────────────────────────────────────────
-// Last resort: send targeted correction prompt to the same model
 
 export async function repromptRepair(
   originalOutput: string,
@@ -304,10 +618,10 @@ export async function repromptRepair(
   const cfg = ROUTING_CONFIG.repair;
   const preferredModel: ModelConfig | undefined = preferredModelCost
     ? {
-      provider: preferredModelCost.provider as ModelConfig['provider'],
-      model: preferredModelCost.model,
-      maxTokens: cfg.primary.maxTokens,
-    }
+        provider: preferredModelCost.provider as ModelConfig['provider'],
+        model: preferredModelCost.model,
+        maxTokens: cfg.primary.maxTokens,
+      }
     : undefined;
 
   const correctionPrompt = `The following JSON output failed validation with these errors:

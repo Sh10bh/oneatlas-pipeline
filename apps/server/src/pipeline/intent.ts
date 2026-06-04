@@ -5,6 +5,7 @@ import { structuralRepair, fieldRepair, repromptRepair } from '../repair/strateg
 import type { AppIntent } from '../types/AppIntent';
 import type { StageCost } from '../types/JobState';
 import type { RepairLog } from '../types/RepairLog';
+import { normalizeRequestedIntegrations } from '../validation/normalize-appspec';
 
 const SYSTEM_PROMPT = `You are an AI that extracts structured application intent from user descriptions.
 Return ONLY valid JSON matching this exact structure — no explanation, no markdown fences:
@@ -88,8 +89,11 @@ export async function extractIntent(prompt: string): Promise<IntentExtractionRes
     throw new Error(`Intent extraction failed after repairs: ${JSON.stringify(validation.errors)}`);
   }
 
+  const intent = validation.data;
+  intent.integrations_requested = normalizeRequestedIntegrations(intent.integrations_requested ?? []);
+
   return {
-    intent: validation.data,
+    intent,
     cost: response.cost,
     repairLogs,
     retryCount,

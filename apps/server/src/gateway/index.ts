@@ -165,9 +165,21 @@ async function callGroq(req: GatewayRequest): Promise<GatewayResponse> {
   };
 }
 
+function readApiKey(envName: string): string {
+  const raw = process.env[envName]?.trim();
+  if (!raw) throw new Error(`${envName} not set`);
+  return raw;
+}
+
+function readOpenRouterKey(): string {
+  const key = readApiKey('OPENROUTER_API_KEY');
+  // Common copy/paste mistake: key starts with "k-or-v1-" instead of "sk-or-v1-"
+  if (key.startsWith('k-or-v1-')) return `s${key}`;
+  return key;
+}
+
 async function callOpenRouter(req: GatewayRequest): Promise<GatewayResponse> {
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey) throw new Error('OPENROUTER_API_KEY not set');
+  const apiKey = readOpenRouterKey();
 
   const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
