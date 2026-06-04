@@ -518,7 +518,7 @@ export function consistencyRepair(
       for (const rule of patched.authRules as Array<{ role: string; permissions: Array<{ entity: string }> }>) {
         rule.permissions = rule.permissions.filter((p) => p.entity !== badEntity);
         if (rule.permissions.length === 0) {
-          rule.permissions.push({ entity: fallbackEntity, actions: ['read', 'write'] });
+          (rule.permissions as Array<Record<string, unknown>>).push({ entity: fallbackEntity, actions: ['read', 'write'] });
         }
       }
       repairedCount++;
