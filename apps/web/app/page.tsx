@@ -117,14 +117,14 @@ export default function Home() {
         const d = JSON.parse((event as MessageEvent).data);
         setStages((prev) => ({
           ...prev,
-          [d.stage]: { ...prev[d.stage], status: 'running' },
+          [d.stage as StageName]: { ...prev[d.stage as StageName], status: 'running' },
         }));
       });
       es.addEventListener('stage_complete', (event) => {
         const d = JSON.parse((event as MessageEvent).data);
         setStages((prev) => ({
           ...prev,
-          [d.stage]: {
+          [d.stage as StageName]: {
             status: 'completed',
             latencyMs: d.latencyMs,
             provider: d.cost?.provider,
@@ -137,7 +137,7 @@ export default function Home() {
         const d = JSON.parse((event as MessageEvent).data);
         setStages((prev) => ({
           ...prev,
-          [d.stage]: { ...prev[d.stage], status: 'failed', error: d.error },
+          [d.stage as StageName]: { ...prev[d.stage as StageName], status: 'failed', error: d.error },
         }));
       });
       es.addEventListener('generation_complete', async () => {
