@@ -1,6 +1,6 @@
 # OneAtlas Pipeline
 
-AI Engineer trial-task submission. A 3-stage pipeline that converts a plain-English app description into a validated, machine-readable AppSpec — with strict validation, classified repair strategies, multi-provider AI routing, and SSE progress streaming.
+A 3-stage pipeline that converts a plain-English app description into a validated, machine-readable AppSpec — with strict validation, classified repair strategies, multi-provider AI routing, and SSE progress streaming.
 
 **Live frontend:** https://oneatlas-pipeline.vercel.app
 **Backend API:** https://oneatlas-pipeline.onrender.com
